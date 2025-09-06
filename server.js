@@ -40,7 +40,7 @@ async function checkDBConnection() {
 // App Setup
 const app = express();
 app.use(cors({
-  origin: 'http://localhost:5173', // React app URL
+  origin: 'https://ethioexam.netlify.app', // React app URL
   credentials: true,               // Allow cookies to be sent
 }));
 app.use(bodyParser.json());
