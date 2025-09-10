@@ -39,9 +39,20 @@ async function checkDBConnection() {
 
 // App Setup
 const app = express();
+const allowedOrigins = [
+  'http://localhost:3000',      // for local React dev
+  'https://ethioexam.netlify.app' // production React app
+];
+
 app.use(cors({
-  origin: 'https://ethioexam.netlify.app', // React app URL
-  credentials: true,               // Allow cookies to be sent
+  origin: function(origin, callback) {
+    if (!origin || allowedOrigins.includes(origin)) {
+      callback(null, true);
+    } else {
+      callback(new Error('Not allowed by CORS'));
+    }
+  },
+  credentials: true
 }));
 app.use(bodyParser.json());
 app.use(cookieParser());
@@ -450,6 +461,100 @@ app.post('/submit_question', async (req, res) => {
     connection.release();
   }
 });
+
+
+// bulk quetsion upload
+app.post('/submit_bulk_questions', async (req, res) => {
+  console.log('Bulk upload request body:', req.body);
+
+  const { exam_id, user_id, questions } = req.body;
+
+  // Basic validation
+  if (!exam_id || !user_id || !Array.isArray(questions) || questions.length === 0) {
+    return res.status(400).json({ error: 'Invalid input: exam_id, user_id, and questions are required.' });
+  }
+
+  const connection = await pool.getConnection();
+  try {
+    await connection.beginTransaction();
+
+    const insertQuestionSql = `
+      INSERT INTO questions (exam_id, submitted_by, question_text, verified, explanation, difficulty, tags)
+      VALUES (?, ?, ?, 0, ?, ?, ?)
+    `;
+
+    const insertChoiceSql = `
+      INSERT INTO choices (question_id, choice_label, choice_text, is_correct)
+      VALUES (?, ?, ?, ?)
+    `;
+
+    const insertedIds = [];
+
+    for (const q of questions) {
+      const {
+        question_number,
+        question_text,
+        options,
+        explanation,
+        difficulty,
+        tags
+      } = q;
+
+      // Validate question
+      if (
+        !question_number ||
+        !question_text ||
+        !Array.isArray(options) ||
+        options.length < 2 ||
+        !options.some(o => o.is_correct)
+      ) {
+        throw new Error(`Invalid question at number ${question_number}`);
+      }
+
+      const tagsString = Array.isArray(tags) ? tags.join(',') : (tags || null);
+
+      // Insert question
+      const [questionResult] = await connection.execute(insertQuestionSql, [
+        exam_id,
+        user_id,
+        question_text,
+        explanation || null,
+        difficulty || 'None',
+        tagsString
+      ]);
+
+      const questionId = questionResult.insertId;
+      insertedIds.push(questionId);
+
+      // Insert choices
+      for (const opt of options) {
+        await connection.execute(insertChoiceSql, [
+          questionId,
+          opt.label,
+          opt.text,
+          opt.is_correct ? 1 : 0
+        ]);
+      }
+    }
+
+    await connection.commit();
+    res.status(201).json({
+      message: 'Bulk questions submitted successfully',
+      inserted_question_ids: insertedIds
+    });
+
+  } catch (error) {
+    await connection.rollback();
+    console.error('Error in bulk insert:', error);
+    res.status(500).json({ error: 'Failed to submit bulk questions' });
+  } finally {
+    connection.release();
+  }
+});
+
+
+
+
 
 
 app.get('/api/submitted-questions', async (req, res) => {
