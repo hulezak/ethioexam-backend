@@ -40,7 +40,7 @@ async function checkDBConnection() {
 // App Setup
 const app = express();
 const allowedOrigins = [
-  'http://localhost:3000',      // for local React dev
+  'http://localhost:5173',      // for local React dev
   'https://ethioexam.netlify.app' // production React app
 ];
 
