@@ -269,6 +269,29 @@ app.get('/exams', async (req, res) => {
     res.status(500).json({ success: false, message: 'Internal server error' });
   }
 });
+// Update exam details
+app.put('/exams/:exam_id', async (req, res) => {
+  const { exam_id } = req.params;
+  const { title, exam_type, exam_subject, exam_year, stream, description } = req.body;
+
+  if (!title || !exam_type || !exam_subject || !exam_year || !stream) {
+    return res.status(400).json({ error: 'All required fields must be provided' });
+  }
+
+  try {
+    await pool.query(
+      `UPDATE exams 
+       SET title = ?, exam_type = ?, exam_subject = ?, exam_year = ?, stream = ?, description = ?
+       WHERE exam_id = ?`,
+      [title, exam_type, exam_subject, exam_year, stream, description || '', exam_id]
+    );
+
+    res.json({ success: true, message: 'Exam updated successfully' });
+  } catch (err) {
+    console.error('Error updating exam:', err);
+    res.status(500).json({ error: 'Failed to update exam' });
+  }
+});
 
 
 app.get('/users/role', async (req, res) => {
@@ -320,6 +343,31 @@ app.post('/exam-access', async (req, res) => {
   } catch (err) {
     console.error('Error granting access:', err);
     res.status(500).json({ error: 'Failed to grant access' });
+  }
+});
+
+// Revoke a user's access to a specific exam
+app.delete('/exam-access/:exam_id/:user_id', async (req, res) => {
+  const { exam_id, user_id } = req.params;
+
+  if (!exam_id || !user_id) {
+    return res.status(400).json({ error: 'exam_id and user_id are required' });
+  }
+
+  try {
+    const [result] = await pool.query(
+      'DELETE FROM exam_access WHERE exam_id = ? AND user_id = ?',
+      [exam_id, user_id]
+    );
+
+    if (result.affectedRows === 0) {
+      return res.status(404).json({ error: 'Access not found' });
+    }
+
+    res.json({ success: true, message: 'Access revoked successfully' });
+  } catch (err) {
+    console.error('Error revoking access:', err);
+    res.status(500).json({ error: 'Failed to revoke access' });
   }
 });
 
@@ -467,11 +515,11 @@ app.post('/submit_question', async (req, res) => {
 app.post('/submit_bulk_questions', async (req, res) => {
   console.log('Bulk upload request body:', req.body);
 
-  const { exam_id, user_id, questions } = req.body;
+  const {  examId,  userId, questions } = req.body;
 
   // Basic validation
-  if (!exam_id || !user_id || !Array.isArray(questions) || questions.length === 0) {
-    return res.status(400).json({ error: 'Invalid input: exam_id, user_id, and questions are required.' });
+  if (!examId || !userId || !Array.isArray(questions) || questions.length === 0) {
+    return res.status(400).json({ error: 'Invalid input: examId, userId, and questions are required.' });
   }
 
   const connection = await pool.getConnection();
@@ -515,8 +563,8 @@ app.post('/submit_bulk_questions', async (req, res) => {
 
       // Insert question
       const [questionResult] = await connection.execute(insertQuestionSql, [
-        exam_id,
-        user_id,
+        examId,
+        userId,
         question_text,
         explanation || null,
         difficulty || 'None',
