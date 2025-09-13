@@ -41,7 +41,8 @@ async function checkDBConnection() {
 const app = express();
 const allowedOrigins = [
   'http://localhost:5173',      // for local React dev
-  'https://ethioexam.netlify.app' // production React app
+  'https://ethioexam.netlify.app',
+  'https://ethioexam2.netlify.app/' // production React app
 ];
 
 app.use(cors({
@@ -173,11 +174,6 @@ app.get('/users/me', authenticate, async (req, res) => {
     res.status(500).send({ message: 'Failed to fetch profile' });
   }
 });
-
-
-
-
-
 
 
 
