@@ -37,23 +37,33 @@ async function checkDBConnection() {
 }
 
 // App Setup
-const app = express();
 const allowedOrigins = [
-  'http://localhost:5173',      // for local React dev
-  'https://ethioexam.netlify.app',
-  'https://ethioexam2.netlify.app' // production React app
+  'http://localhost:5173',          // local dev
+  'https://ethioexam.netlify.app',  // production frontend 1
+  'https://ethioexam2.netlify.app'  // production frontend 2
 ];
 
-app.use(cors({
+// ✅ CORS middleware
+const corsOptions = {
   origin: function(origin, callback) {
+    // allow requests with no origin (e.g., mobile apps, Postman)
     if (!origin || allowedOrigins.includes(origin)) {
       callback(null, true);
     } else {
       callback(new Error('Not allowed by CORS'));
     }
   },
-  credentials: true
-}));
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'], // allowed methods
+  allowedHeaders: ['Content-Type', 'Authorization'],    // allowed headers
+  credentials: true                                      // allow cookies/auth
+};
+
+// Apply CORS globally
+app.use(cors(corsOptions));
+
+// ✅ Handle preflight OPTIONS requests for all routes
+app.options('*', cors(corsOptions));
+
 app.use(bodyParser.json());
 app.use(cookieParser());
 // 🔐 Authentication Middleware
@@ -877,6 +887,7 @@ const PORT = process.env.PORT || 3000;
   });
 })();
    
+
 
 
 
