@@ -48,16 +48,16 @@ const allowedOrigins = [
 // ✅ CORS middleware
 const corsOptions = {
   origin: function(origin, callback) {
-    // allow requests with no origin (e.g., mobile apps, Postman)
+    // Allow requests with no origin (Postman, server-to-server)
     if (!origin || allowedOrigins.includes(origin)) {
       callback(null, true);
     } else {
       callback(new Error('Not allowed by CORS'));
     }
   },
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'], // allowed methods
-  allowedHeaders: ['Content-Type', 'Authorization'],    // allowed headers
-  credentials: true                                      // allow cookies/auth
+  allowedHeaders: ['Content-Type'], // still only allow these headers
+  credentials: true, // allow cookies/auth
+  methods: '*'        // allow all HTTP methods
 };
 
 // Apply CORS globally
@@ -889,6 +889,7 @@ const PORT = process.env.PORT || 3000;
   });
 })();
    
+
 
 
 
