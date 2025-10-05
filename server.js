@@ -37,6 +37,8 @@ async function checkDBConnection() {
 }
 
 // App Setup
+
+const app = express();
 const allowedOrigins = [
   'http://localhost:5173',          // local dev
   'https://ethioexam.netlify.app',  // production frontend 1
@@ -887,6 +889,7 @@ const PORT = process.env.PORT || 3000;
   });
 })();
    
+
 
 
 
