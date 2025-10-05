@@ -7,7 +7,6 @@ const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
 const cors = require('cors');
 const cookieParser= require('cookie-parser');
-
 const SECRET_KEY = process.env.JWT_SECRET || 'haile';
 
 // ✅ TiDB Connection Pool
@@ -367,32 +366,45 @@ app.delete('/exam-access/:exam_id/:user_id', async (req, res) => {
   }
 });
 
-
+// we check user acces sofr exam
 app.get('/get_myexams', authenticate, async (req, res) => {
   try {
     const userId = req.user.user_id;
-    console.log('User ID:', userId);
-    // No body on GET requests, so this will usually be empty or undefined
-    // console.log('Request body:', req.body); // optional, can be removed
+    const userRole = req.user.role; // assuming role is in the JWT/session
+console.log(userRole,userId)
+    let query = '';
+    let params = [];
 
-    const [rows] = await pool.execute(
-      `
-      SELECT e.exam_id, e.title, e.exam_type, e.exam_subject, 
-             e.exam_year, e.stream, e.description, e.created_at
-      FROM exam_access ea
-      INNER JOIN exams e ON ea.exam_id = e.exam_id
-      WHERE ea.user_id = ?
-      ORDER BY e.created_at DESC
-      `,
-      [userId]
-    );
+    if (userRole === 'admin') {
+      // Admin sees all exams
+      query = `
+        SELECT exam_id, title, exam_type, exam_subject, 
+               exam_year, stream, description, created_at
+        FROM exams
+        ORDER BY created_at DESC
+      `;
+    } else {
+      // Regular user sees only exams they have access to
+      query = `
+        SELECT e.exam_id, e.title, e.exam_type, e.exam_subject, 
+               e.exam_year, e.stream, e.description, e.created_at
+        FROM exam_access ea
+        INNER JOIN exams e ON ea.exam_id = e.exam_id
+        WHERE ea.user_id = ?
+        ORDER BY e.created_at DESC
+      `;
+      params = [userId];
+    }
 
+    const [rows] = await pool.execute(query, params);
     res.json(rows);
+
   } catch (err) {
     console.error('Error fetching exams:', err);
     res.status(500).json({ message: 'Server error fetching exams' });
   }
 });
+
 
 
 // 📚 SUBJECTS
