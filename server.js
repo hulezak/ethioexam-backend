@@ -520,23 +520,24 @@ app.post('/submit_question', async (req, res) => {
 
 
 // bulk quetsion upload
+// Bulk question upload with refs (paragraph, image, instruction)
 app.post('/submit_bulk_questions', async (req, res) => {
   console.log('Bulk upload request body:', req.body);
 
-  const {  examId,  userId, questions } = req.body;
+  const { examId, userId, questions } = req.body;
 
-  // Basic validation
   if (!examId || !userId || !Array.isArray(questions) || questions.length === 0) {
     return res.status(400).json({ error: 'Invalid input: examId, userId, and questions are required.' });
   }
 
   const connection = await pool.getConnection();
+
   try {
     await connection.beginTransaction();
 
     const insertQuestionSql = `
-      INSERT INTO questions (exam_id, submitted_by, question_text, verified, explanation, difficulty, tags)
-      VALUES (?, ?, ?, 0, ?, ?, ?)
+      INSERT INTO questions (exam_id, submitted_by, question_text,q_number, verified, explanation, difficulty, tags)
+      VALUES (?, ?, ?, ?, 0, ?, ?, ?)
     `;
 
     const insertChoiceSql = `
@@ -544,27 +545,18 @@ app.post('/submit_bulk_questions', async (req, res) => {
       VALUES (?, ?, ?, ?)
     `;
 
+    const insertRefSql = `
+      INSERT INTO ref_tables (question_id, paragraph, image_url, instruction, created_at)
+      VALUES (?, ?, ?, ?, NOW())
+    `;
+
     const insertedIds = [];
 
     for (const q of questions) {
-      const {
-        question_number,
-        question_text,
-        options,
-        explanation,
-        difficulty,
-        tags
-      } = q;
+      const { question_text, options, explanation, difficulty, tags, ref,question_number } = q;
 
-      // Validate question
-      if (
-        !question_number ||
-        !question_text ||
-        !Array.isArray(options) ||
-        options.length < 2 ||
-        !options.some(o => o.is_correct)
-      ) {
-        throw new Error(`Invalid question at number ${question_number}`);
+      if (!question_text || !Array.isArray(options) || options.length < 2 || !options.some(o => o.is_correct)) {
+        throw new Error(`Invalid question: missing text or correct option.`);
       }
 
       const tagsString = Array.isArray(tags) ? tags.join(',') : (tags || null);
@@ -574,6 +566,7 @@ app.post('/submit_bulk_questions', async (req, res) => {
         examId,
         userId,
         question_text,
+        question_number,
         explanation || null,
         difficulty || 'None',
         tagsString
@@ -587,13 +580,25 @@ app.post('/submit_bulk_questions', async (req, res) => {
         await connection.execute(insertChoiceSql, [
           questionId,
           opt.label,
-          opt.text,
+          opt.text || null,
           opt.is_correct ? 1 : 0
+        ]);
+      }
+
+      // Insert reference (paragraph, image_url, instruction)
+      if (ref) {
+        const { paragraph, image_url, instruction } = ref;
+        await connection.execute(insertRefSql, [
+          questionId,
+          paragraph || null,
+          image_url || null,
+          instruction || null
         ]);
       }
     }
 
     await connection.commit();
+
     res.status(201).json({
       message: 'Bulk questions submitted successfully',
       inserted_question_ids: insertedIds
@@ -602,7 +607,7 @@ app.post('/submit_bulk_questions', async (req, res) => {
   } catch (error) {
     await connection.rollback();
     console.error('Error in bulk insert:', error);
-    res.status(500).json({ error: 'Failed to submit bulk questions' });
+    res.status(500).json({ error: 'Failed to submit bulk questions', details: error.message });
   } finally {
     connection.release();
   }
@@ -612,9 +617,9 @@ app.post('/submit_bulk_questions', async (req, res) => {
 
 
 
-
 app.get('/api/submitted-questions', async (req, res) => {
   const { userId, examId } = req.query;
+  const userRole = req.user.role; // get role from authenticated user
 
   if (!userId || !examId) {
     return res.status(400).json({ error: 'Missing userId or examId' });
@@ -622,10 +627,11 @@ app.get('/api/submitted-questions', async (req, res) => {
 
   const connection = await pool.getConnection();
   try {
-    const sql = `
+    let sql = `
       SELECT 
         q.question_id AS id,
         q.question_text AS text,
+        q.q_number,
         q.exam_id,
         q.submitted_by,
         q.verified,
@@ -643,15 +649,27 @@ app.get('/api/submitted-questions', async (req, res) => {
         ) AS choices
       FROM questions q
       LEFT JOIN choices c ON q.question_id = c.question_id
-      WHERE q.exam_id = ? AND q.submitted_by = ?
-      GROUP BY q.question_id
-      ORDER BY q.created_at ASC
+      WHERE q.exam_id = ?
     `;
 
-    const [rows] = await connection.execute(sql, [examId, userId]);
+    const params = [examId];
+
+    // Only filter by submitted_by if user is not admin
+    if (userRole !== 'admin') {
+      sql += ' AND q.submitted_by = ?';
+      params.push(userId);
+    }
+
+    sql += `
+      GROUP BY q.question_id
+      ORDER BY q.q_number ASC, q.created_at ASC
+    `;
+
+    const [rows] = await connection.execute(sql, params);
 
     const formatted = rows.map(r => ({
       id: r.id,
+      q_number: r.q_number,
       text: r.text,
       choices: Array.isArray(r.choices) ? r.choices : [],
       verified: r.verified,
@@ -669,6 +687,9 @@ app.get('/api/submitted-questions', async (req, res) => {
     connection.release();
   }
 });
+
+
+
 
 app.get('/user-submitted-stats', async (req, res) => {
 
