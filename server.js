@@ -366,6 +366,35 @@ app.delete('/exam-access/:exam_id/:user_id', async (req, res) => {
   }
 });
 
+// PUT /exams/:id/status
+// Toggle exam status
+app.put('/exams/:exam_id/status', async (req, res) => {
+  const { exam_id } = req.params;
+
+  console.log('toggling exam status', exam_id);
+  try {
+    const [result] = await pool.execute(
+      `UPDATE exams
+       SET status = CASE
+           WHEN status = 'public' THEN 'private'
+           ELSE 'public'
+       END
+       WHERE exam_id = ?`,
+      [exam_id]
+    );
+
+    if (result.affectedRows === 0) {
+      return res.status(404).json({ message: 'Exam not found' });
+    }
+
+    res.json({ message: 'Exam status toggled successfully' });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: 'Failed to update exam status', error: err });
+  }
+});
+
+
 // we check user acces sofr exam
 app.get('/get_myexams', authenticate, async (req, res) => {
   try {
@@ -889,6 +918,135 @@ app.put('/api/update_question', async (req, res) => {
 
 
 
+
+
+// studnets
+
+// get public exam from exam tabel fetch exam whcih are public and send tehm to frotend broo
+app.get('/students/public-exams', async (req, res) => {
+  console.log('Fetching public exams');
+  try {
+    const query = `
+      SELECT 
+        exam_id,
+        title,
+        exam_type,
+        exam_subject,
+        status,
+        exam_year,
+        stream,
+        description,
+        created_by,
+        created_at
+      FROM exams 
+      WHERE status = 'public'
+      ORDER BY created_at DESC
+    `;
+    
+    const [rows] = await pool.query(query); // destructure the array returned by mysql2
+    
+    res.status(200).json({
+      success: true,
+      message: 'Public exams fetched successfully',
+      data: rows,
+      count: rows.length
+    });
+    
+  } catch (error) {
+    console.error('Error fetching public exams:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error',
+      error: error.message
+    });
+  }
+});
+
+
+app.get('/students/exam-questions/:examId', async (req, res) => {
+  try {
+    const { examId } = req.params;
+console.log('Fetching public questions for examId:', examId);
+    // 1. Quick exam access check
+    const [examRows] = await pool.execute(
+      'SELECT exam_id, title FROM exams WHERE exam_id = ? AND status = "public"',
+      [examId]
+    );
+    
+    if (examRows.length === 0) {
+      return res.status(404).json({ success: false, message: 'Exam not found or not public' });
+    }
+
+    const exam = examRows[0];
+
+    // 2. Fetch questions, choices, and ref data in single query
+    const questionsQuery = `
+      SELECT 
+        q.question_id,
+        q.question_text,
+        q.explanation,
+        c.choice_label,
+        c.choice_text,
+        c.is_correct,
+        r.paragraph,
+        r.image_url,
+        r.instruction
+      FROM questions q
+      INNER JOIN choices c ON q.question_id = c.question_id
+      LEFT JOIN ref_tables r ON q.question_id = r.question_id
+      WHERE q.exam_id = ?
+      ORDER BY q.q_number, c.choice_label
+    `;
+
+    const [rows] = await pool.execute(questionsQuery, [examId]);
+
+    if (rows.length === 0) {
+      return res.status(404).json({ success: false, message: 'No questions found' });
+    }
+
+    // 3. Process data efficiently
+    const questionsMap = new Map();
+
+    rows.forEach(row => {
+      if (!questionsMap.has(row.question_id)) {
+        questionsMap.set(row.question_id, {
+          id: row.question_id,
+          question: row.question_text,
+          explanation: row.explanation,
+          paragraph: row.paragraph,
+          imageUrl: row.image_url,
+          instruction: row.instruction,
+          options: [],
+          correctAnswer: null
+        });
+      }
+
+      const question = questionsMap.get(row.question_id);
+      question.options.push(row.choice_text);
+      
+      if (row.is_correct) {
+        question.correctAnswer = row.choice_text;
+      }
+    });
+
+    const questions = Array.from(questionsMap.values());
+
+    res.json({
+      success: true,
+      exam: {
+        exam_id: exam.exam_id,
+        title: exam.title,
+        duration: exam.duration || 60
+      },
+      questions: questions,
+      totalQuestions: questions.length
+    });
+
+  } catch (error) {
+    console.error('Error:', error);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
 
 // 🏁 Start Server after DB check
 const PORT = process.env.PORT || 3000;
