@@ -617,10 +617,11 @@ app.post('/submit_bulk_questions', async (req, res) => {
 
 
 
-app.get('/api/submitted-questions', async (req, res) => {
+app.get('/api/submitted-questions',authenticate, async (req, res) => {
   const { userId, examId } = req.query;
+  console.log('userId, examId', userId, examId)
   const userRole = req.user.role; // get role from authenticated user
-
+  console.log('fetching submitted questions', req.query, userRole);
   if (!userId || !examId) {
     return res.status(400).json({ error: 'Missing userId or examId' });
   }
