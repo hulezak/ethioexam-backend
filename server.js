@@ -920,38 +920,60 @@ app.put('/api/update_question', async (req, res) => {
 
 
 
-// studnets
+// students
 
 // get public exam from exam tabel fetch exam whcih are public and send tehm to frotend broo
-app.get('/students/public-exams', async (req, res) => {
+app.get('/students/public-exams', authenticate, async (req, res) => {
   console.log('Fetching public exams');
+
   try {
-    const query = `
-      SELECT 
-        exam_id,
-        title,
-        exam_type,
-        exam_subject,
-        status,
-        exam_year,
-        stream,
-        description,
-        created_by,
-        created_at
-      FROM exams 
-      WHERE status = 'public'
-      ORDER BY created_at DESC
-    `;
-    
-    const [rows] = await pool.query(query); // destructure the array returned by mysql2
-    
+    let query = '';
+    let params = [];
+console.log('User role:', req.user.role);   
+    if (req.user.role === 'admin') {
+      // Admin sees all public exams
+      query = `
+        SELECT 
+          exam_id, title, exam_type, exam_subject, status, exam_year, stream,
+          description, created_by, created_at
+        FROM exams
+        WHERE status = 'public'
+        ORDER BY created_at DESC
+      `;
+    } else {
+      // Student → fetch stream from students table
+      console.log('Fetching student stream for user_id:', req.user.user_id);
+      const [studentRows] = await pool.query(
+        'SELECT stream FROM students WHERE user_id = ?',
+        [req.user.user_id]
+      );
+
+      if (!studentRows.length) {
+        return res.status(404).json({ success: false, message: 'Student not found' });
+      }
+
+      const studentStream = studentRows[0].stream;
+
+      query = `
+        SELECT 
+          exam_id, title, exam_type, exam_subject, status, exam_year, stream,
+          description, created_by, created_at
+        FROM exams
+        WHERE status = 'public' AND stream = ?
+        ORDER BY created_at DESC
+      `;
+      params = [studentStream];
+    }
+
+    const [rows] = await pool.query(query, params);
+
     res.status(200).json({
       success: true,
       message: 'Public exams fetched successfully',
       data: rows,
       count: rows.length
     });
-    
+
   } catch (error) {
     console.error('Error fetching public exams:', error);
     res.status(500).json({
@@ -961,6 +983,7 @@ app.get('/students/public-exams', async (req, res) => {
     });
   }
 });
+
 
 
 app.get('/students/exam-questions/:examId', async (req, res) => {
@@ -1047,6 +1070,134 @@ console.log('Fetching public questions for examId:', examId);
     res.status(500).json({ success: false, message: 'Server error' });
   }
 });
+
+
+// 
+app.post('/auth/register/student', async (req, res) => {
+  const { 
+    email, 
+    password,
+    first_name, 
+    last_name, 
+    phone, 
+    school_name, 
+    grade_level,
+    stream,
+    referral_code
+  } = req.body;
+
+  console.log('Registering student:', { email, first_name, school_name, grade_level });
+const referral_code1 = parseInt(referral_code);
+  // 1️⃣ Validation
+  if (!email || !password || !first_name || !last_name || !phone || !school_name || !grade_level) {
+    return res.status(400).json({ 
+      success: false, 
+      message: 'All required fields must be filled' 
+    });
+  }
+
+  const connection = await pool.getConnection();
+  
+  try {
+    await connection.beginTransaction();
+
+    // 2️⃣ Check if email already exists
+    const [existingUsers] = await connection.query(
+      'SELECT user_id FROM users WHERE email = ?',
+      [email]
+    );
+
+    if (existingUsers.length > 0) {
+      await connection.rollback();
+      return res.status(400).json({
+        success: false,
+        message: 'Email already exists'
+      });
+    }
+
+    // 3️⃣ If referral code provided → verify it exists in students table
+    let referredByStudentId = null;
+    if (referral_code1) {
+      const [referrer] = await connection.query(
+        'SELECT id FROM students WHERE id = ?',
+        [referral_code1]
+      );
+
+      if (referrer.length === 0) {
+        await connection.rollback();
+        return res.status(400).json({
+          success: false,
+          message: 'Invalid referral code'
+        });
+      }
+
+      // If valid, store it for later insert
+      referredByStudentId = referral_code1;
+    }
+
+    // 4️⃣ Hash password
+    const hashedPassword = await bcrypt.hash(password, 10);
+
+    // 5️⃣ Insert into users table
+    const [userResult] = await connection.query(
+      `INSERT INTO users 
+      (email, password_hash, role, first_name, last_name, phone) 
+      VALUES (?, ?, 'student', ?, ?, ?)`,
+      [email, hashedPassword, first_name, last_name, phone]
+    );
+
+    const userId = userResult.insertId;
+
+    // 6️⃣ Insert into students table
+    const [studentResult] = await connection.query(
+      `INSERT INTO students 
+      (user_id, school_name, grade_level, stream, referred_by, registration_date) 
+      VALUES (?, ?, ?, ?, ?, NOW())`,
+      [userId, school_name, grade_level, stream || null, referredByStudentId]
+    );
+
+    // 7️⃣ If referral was valid → update the referral count for that student
+    if (referredByStudentId) {
+      await connection.query(
+        `UPDATE students 
+         SET referral_count = COALESCE(referral_count, 0) + 1 
+         WHERE id = ?`,
+        [referredByStudentId]
+      );
+    }
+
+    // 8️⃣ Commit changes
+    await connection.commit();
+
+    res.status(201).json({
+      success: true,
+      message: 'Registration successful!',
+      studentId: studentResult.insertId
+    });
+
+  } catch (err) {
+    await connection.rollback();
+    console.error('Registration error:', err);
+    
+    if (err.code === 'ER_DUP_ENTRY') {
+      return res.status(400).json({
+        success: false,
+        message: 'Email already exists'
+      });
+    }
+
+    res.status(500).json({
+      success: false,
+      message: 'Registration failed. Please try again.'
+    });
+  } finally {
+    connection.release();
+  }
+});
+
+
+
+
 
 // 🏁 Start Server after DB check
 const PORT = process.env.PORT || 3000;
