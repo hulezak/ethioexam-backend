@@ -565,7 +565,7 @@ app.post('/submit_bulk_questions', async (req, res) => {
     await connection.beginTransaction();
 
     const insertQuestionSql = `
-      INSERT INTO questions (exam_id, submitted_by, question_text,q_number, verified, explanation, difficulty, tags)
+      INSERT INTO questions (exam_id, submitted_by, question_text, q_number, verified, explanation, difficulty, tags)
       VALUES (?, ?, ?, ?, 0, ?, ?, ?)
     `;
 
@@ -582,7 +582,7 @@ app.post('/submit_bulk_questions', async (req, res) => {
     const insertedIds = [];
 
     for (const q of questions) {
-      const { question_text, options, explanation, difficulty, tags, ref,question_number } = q;
+      const { question_text, options, explanation, difficulty, tags, paragraph, image_url, instruction, question_number } = q;
 
       if (!question_text || !Array.isArray(options) || options.length < 2 || !options.some(o => o.is_correct)) {
         throw new Error(`Invalid question: missing text or correct option.`);
@@ -614,15 +614,16 @@ app.post('/submit_bulk_questions', async (req, res) => {
         ]);
       }
 
-      // Insert reference (paragraph, image_url, instruction)
-      if (ref) {
-        const { paragraph, image_url, instruction } = ref;
+      // FIX: Check if paragraph, image_url, or instruction exist directly in the question object
+      // instead of looking for a nested "ref" object
+      if (paragraph || image_url || instruction) {
         await connection.execute(insertRefSql, [
           questionId,
           paragraph || null,
           image_url || null,
           instruction || null
         ]);
+        console.log(`✅ Added ref data for question ${questionId}:`, { paragraph: !!paragraph, image_url: !!image_url, instruction: !!instruction });
       }
     }
 
@@ -630,7 +631,8 @@ app.post('/submit_bulk_questions', async (req, res) => {
 
     res.status(201).json({
       message: 'Bulk questions submitted successfully',
-      inserted_question_ids: insertedIds
+      inserted_question_ids: insertedIds,
+      inserted_count: insertedIds.length
     });
 
   } catch (error) {
@@ -641,8 +643,6 @@ app.post('/submit_bulk_questions', async (req, res) => {
     connection.release();
   }
 });
-
-
 
 
 
@@ -785,15 +785,52 @@ app.get('/user-submitted-stats', async (req, res) => {
   }
 });
 
-app.put('/delete_qustion', async(req,res) =>{
+app.put('/delete_question', authenticate, async (req, res) => {
+  console.log('Delete question request body:', req.body);
+    const { question_id } = req.body;
 
-//  accept the quetion id and user id
-// make sure the user sibmitted tat quetsion
-// delet the question
-// delete the related choices and solution and otehr stuffss
+    if (!question_id) {
+        return res.status(400).json({ error: "question_id is required" });
+    }
 
+    const connection = await pool.getConnection();
+    try {
+        await connection.beginTransaction();
 
-})
+        // 1. Check if the question exists and ownership/admin
+        const [questionRows] = await connection.query(
+            "SELECT submitted_by FROM questions WHERE question_id = ?",
+            [question_id]
+        );
+
+        if (!questionRows.length) {
+            await connection.rollback();
+            return res.status(404).json({ error: "Question not found" });
+        }
+
+        const questionOwnerId = questionRows[0].submitted_by;
+
+        if (req.user.role !== 'admin' && req.user.user_id !== questionOwnerId) {
+            await connection.rollback();
+            return res.status(403).json({ error: "Not authorized to delete this question" });
+        }
+
+        // 2. Delete the question itself
+        // All related choices, solutions, and ref_tables will be deleted automatically
+        await connection.query("DELETE FROM questions WHERE question_id = ?", [question_id]);
+
+        await connection.commit();
+        res.json({ message: "Question and all related data deleted successfully" });
+
+    } catch (err) {
+        await connection.rollback();
+        console.error(err);
+        res.status(500).json({ error: "Internal server error" });
+    } finally {
+        connection.release();
+    }
+});
+
 
 // Backend: server.js
 app.put('/api/update_question', async (req, res) => {
@@ -1085,6 +1122,7 @@ app.post('/auth/register/student', async (req, res) => {
     stream,
     referral_code
   } = req.body;
+  console.log('Received registration data:', req.body);
 
   console.log('Registering student:', { email, first_name, school_name, grade_level });
 const referral_code1 = parseInt(referral_code);
