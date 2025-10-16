@@ -107,7 +107,7 @@ app.post('/auth/login', async (req, res) => {
       role: users[0].role 
     };
 
-    const token = jwt.sign(payload, SECRET_KEY, { expiresIn: '1h' });
+    const token = jwt.sign(payload, SECRET_KEY, { expiresIn: '30h' });
 
     // Save role in cookie for easy frontend access (optional)
     res.cookie('role', users[0].role, { httpOnly: false, secure: false, sameSite: 'Strict' });
@@ -1110,128 +1110,193 @@ console.log('Fetching public questions for examId:', examId);
 
 
 // 
-app.post('/auth/register/student', async (req, res) => {
-  const { 
-    email, 
-    password,
-    first_name, 
-    last_name, 
-    phone, 
-    school_name, 
-    grade_level,
-    stream,
-    referral_code
-  } = req.body;
-  console.log('Received registration data:', req.body);
-
-  console.log('Registering student:', { email, first_name, school_name, grade_level });
-const referral_code1 = parseInt(referral_code);
-  // 1️⃣ Validation
-  if (!email || !password || !first_name || !last_name || !phone || !school_name || !grade_level) {
-    return res.status(400).json({ 
-      success: false, 
-      message: 'All required fields must be filled' 
-    });
-  }
-
-  const connection = await pool.getConnection();
-  
+// Get dashboard stats + top referrers
+app.get('/api/admin/dashboard/stats', authenticate, async (req, res) => {
+  console.log('Fetching dashboard stats');
   try {
-    await connection.beginTransaction();
+    // Basic stats
+    const totalStudents = await pool.query('SELECT COUNT(*) as count FROM students');
+    const weeklyReg = await pool.query('SELECT COUNT(*) as count FROM students WHERE registration_date >= DATE_SUB(NOW(), INTERVAL 7 DAY)');
+    const schools = await pool.query('SELECT COUNT(DISTINCT school_name) as count FROM students WHERE school_name IS NOT NULL AND school_name != ""');
+    const activeReferrals = await pool.query('SELECT COUNT(*) as count FROM students WHERE referral_count > 0');
 
-    // 2️⃣ Check if email already exists
-    const [existingUsers] = await connection.query(
-      'SELECT user_id FROM users WHERE email = ?',
-      [email]
+    // Top Referrers - REMOVED HTML COMMENT
+    const topReferrers = await pool.query(
+      `SELECT 
+        s.referral_count,
+        s.school_name,
+        u.first_name, 
+        u.last_name, 
+        u.email,
+        u.phone
+       FROM students s 
+       JOIN users u ON s.user_id = u.user_id
+       WHERE s.referral_count > 0 
+       ORDER BY s.referral_count DESC 
+       LIMIT 10`
     );
 
-    if (existingUsers.length > 0) {
-      await connection.rollback();
-      return res.status(400).json({
-        success: false,
-        message: 'Email already exists'
-      });
-    }
+    console.log('✅ Stats fetched successfully');
 
-    // 3️⃣ If referral code provided → verify it exists in students table
-    let referredByStudentId = null;
-    if (referral_code1) {
-      const [referrer] = await connection.query(
-        'SELECT id FROM students WHERE id = ?',
-        [referral_code1]
-      );
-
-      if (referrer.length === 0) {
-        await connection.rollback();
-        return res.status(400).json({
-          success: false,
-          message: 'Invalid referral code'
-        });
-      }
-
-      // If valid, store it for later insert
-      referredByStudentId = referral_code1;
-    }
-
-    // 4️⃣ Hash password
-    const hashedPassword = await bcrypt.hash(password, 10);
-
-    // 5️⃣ Insert into users table
-    const [userResult] = await connection.query(
-      `INSERT INTO users 
-      (email, password_hash, role, first_name, last_name, phone) 
-      VALUES (?, ?, 'student', ?, ?, ?)`,
-      [email, hashedPassword, first_name, last_name, phone]
-    );
-
-    const userId = userResult.insertId;
-
-    // 6️⃣ Insert into students table
-    const [studentResult] = await connection.query(
-      `INSERT INTO students 
-      (user_id, school_name, grade_level, stream, referred_by, registration_date) 
-      VALUES (?, ?, ?, ?, ?, NOW())`,
-      [userId, school_name, grade_level, stream || null, referredByStudentId]
-    );
-
-    // 7️⃣ If referral was valid → update the referral count for that student
-    if (referredByStudentId) {
-      await connection.query(
-        `UPDATE students 
-         SET referral_count = COALESCE(referral_count, 0) + 1 
-         WHERE id = ?`,
-        [referredByStudentId]
-      );
-    }
-
-    // 8️⃣ Commit changes
-    await connection.commit();
-
-    res.status(201).json({
-      success: true,
-      message: 'Registration successful!',
-      studentId: studentResult.insertId
+    res.json({
+      totalStudents: totalStudents[0][0].count,
+      thisWeekRegistrations: weeklyReg[0][0].count,
+      totalSchools: schools[0][0].count,
+      activeReferrals: activeReferrals[0][0].count,
+      topReferrers: topReferrers[0]
     });
-
-  } catch (err) {
-    await connection.rollback();
-    console.error('Registration error:', err);
     
-    if (err.code === 'ER_DUP_ENTRY') {
-      return res.status(400).json({
-        success: false,
-        message: 'Email already exists'
-      });
-    }
-
-    res.status(500).json({
-      success: false,
-      message: 'Registration failed. Please try again.'
+  } catch (error) {
+    console.error('❌ Database error:', error);
+    res.status(500).json({ 
+      error: 'Database query failed: ' + error.message
     });
-  } finally {
-    connection.release();
   }
 });
+
+// Get dashboard stats + top referrers
+// Get dashboard stats + top referrers
+app.get('/api/admin/dashboard/stats', authenticate, async (req, res) => {
+  console.log('Fetching dashboard stats');
+  try {
+    // Basic stats - USING CORRECT COLUMN NAMES
+    const [totalStudents] = await pool.query(
+      'SELECT COUNT(*) as count FROM students'
+    );
+    
+    const [weeklyReg] = await pool.query(
+      'SELECT COUNT(*) as count FROM students WHERE registration_date >= DATE_SUB(NOW(), INTERVAL 7 DAY)'
+    );
+    
+    const [schools] = await pool.query(
+      'SELECT COUNT(DISTINCT school_name) as count FROM students WHERE school_name IS NOT NULL AND school_name != ""'
+    );
+    
+    const [activeReferrals] = await pool.query(
+      'SELECT COUNT(*) as count FROM students WHERE referral_count > 0'
+    );
+
+    // Top Referrers - CORRECT JOIN WITH YOUR SCHEMA
+    const [topReferrers] = await pool.query(
+      `SELECT 
+        s.referral_count,
+        s.school_name,
+        u.first_name, 
+        u.last_name, 
+        u.email,
+        u.phone
+       FROM students s 
+       JOIN users u ON s.user_id = u.user_id  <!-- CORRECT JOIN -->
+       WHERE s.referral_count > 0 
+       ORDER BY s.referral_count DESC 
+       LIMIT 10`
+    );
+
+    console.log('✅ Stats fetched successfully:', {
+      totalStudents: totalStudents[0].count,
+      weeklyReg: weeklyReg[0].count,
+      schools: schools[0].count,
+      activeReferrals: activeReferrals[0].count,
+      topReferrersCount: topReferrers.length
+    });
+
+    res.json({
+      // Basic Stats
+      totalStudents: totalStudents[0].count,
+      thisWeekRegistrations: weeklyReg[0].count,
+      totalSchools: schools[0].count,
+      activeReferrals: activeReferrals[0].count,
+      
+      // Top Referrers List
+      topReferrers: topReferrers
+    });
+    
+  } catch (error) {
+    console.error('❌ Database error:', error);
+    res.status(500).json({ 
+      error: 'Database query failed',
+      details: error.message,
+      sqlMessage: error.sqlMessage 
+    });
+  }
+});
+
+
+app.get('/user/:userid/referrals', authenticate, async (req, res) => {
+  console.log('Fetching referral data for user:', req.params.userid);
+  try {
+    const userId = req.params.userid;
+
+    // First, get the student ID for this user
+    const [studentRows] = await pool.execute(
+      'SELECT id FROM students WHERE user_id = ?',
+      [userId]
+    );
+
+    if (studentRows.length === 0) {
+      return res.json({
+        success: true,
+        data: {
+          referral_id: userId,
+          referral_count: 0,
+          total_earnings: 0,
+          referrals: []
+        }
+      });
+    }
+
+    const studentId = studentRows[0].id;
+
+    // Get referral count and referred students - JOIN with users table to get names
+    const [referrals] = await pool.execute(`
+      SELECT 
+        s.id,
+        u.first_name,
+        u.last_name,
+        s.school_name,
+        s.grade_level,
+        s.stream,
+        s.registration_date,
+        s.created_at
+      FROM students s
+      JOIN users u ON s.user_id = u.user_id
+      WHERE s.referred_by = ?
+      ORDER BY s.created_at DESC
+    `, [studentId]);
+
+    // Calculate total earnings
+    const totalEarnings = Math.floor(referrals.length / 2);
+
+    res.json({
+      success: true,
+      data: {
+        referral_id: studentId, // This is the actual referral code
+        referral_count: referrals.length,
+        total_earnings: totalEarnings,
+        referrals: referrals.map(ref => ({
+          id: ref.id,
+          first_name: ref.first_name,
+          last_name: ref.last_name,
+          school_name: ref.school_name,
+          grade_level: ref.grade_level,
+          stream: ref.stream,
+          registration_date: ref.registration_date,
+          created_at: ref.created_at
+        }))
+      }
+    });
+
+  } catch (error) {
+    console.error('Error fetching referral data:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error fetching referral data'
+    });
+  }
+});
+
+
+
 
 app.get("/health", async (req, res) => {
   try {
@@ -1246,6 +1311,7 @@ app.get("/health", async (req, res) => {
 
 
 
+
 // 🏁 Start Server after DB check
 const PORT = process.env.PORT || 3000;
 (async () => {
@@ -1255,7 +1321,6 @@ const PORT = process.env.PORT || 3000;
   });
 })();
    
-
 
 
 
