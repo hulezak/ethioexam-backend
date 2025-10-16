@@ -1233,7 +1233,16 @@ const referral_code1 = parseInt(referral_code);
   }
 });
 
-
+app.get("/health", async (req, res) => {
+  try {
+    // Simple ping to DB
+    const [rows] = await pool.query("SELECT 1");
+    res.status(200).send("✅ Backend & Database OK");
+  } catch (err) {
+    console.error("DB ping failed:", err.message);
+    res.status(503).send("❌ Database connection failed");
+  }
+})
 
 
 
@@ -1246,6 +1255,7 @@ const PORT = process.env.PORT || 3000;
   });
 })();
    
+
 
 
 
