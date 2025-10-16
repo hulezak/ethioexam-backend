@@ -41,8 +41,8 @@ const app = express();
 const allowedOrigins = [
   'http://localhost:5173',      // for local React dev
   'https://ethioexam.netlify.app',
-  'https://ethioexam2.netlify.app',
-  'https://ethioexam.pro.et'// production React app
+  'https://ethioexam2.netlify.app' // production React app
+  'https://ethioexam.pro.et' // production React app
 ];
 
 app.use(cors({
@@ -1424,6 +1424,70 @@ app.get('/user/:userid/referrals', authenticate, async (req, res) => {
 
 
 
+
+app.post('/students/list', authenticate, async (req, res) => {
+  console.log('Fetching all students list');
+  try {
+    const { page = 1, limit = 50 } = req.body;
+    const offset = (page - 1) * limit;
+
+    // Minimal test query
+    const testQuery = `
+      SELECT 
+        u.user_id,
+        u.first_name,
+        u.last_name,
+        u.email,
+        s.school_name,
+        s.grade_level
+      FROM students s
+      INNER JOIN users u ON s.user_id = u.user_id
+      ORDER BY s.created_at DESC
+      LIMIT ${parseInt(limit)} OFFSET ${parseInt(offset)}
+    `;
+
+    console.log('Executing test query:', testQuery);
+
+    const [students] = await pool.query(testQuery);
+
+    // Simple count
+    const [countResult] = await pool.query('SELECT COUNT(*) as total FROM students');
+    const totalStudents = countResult[0].total;
+    const totalPages = Math.ceil(totalStudents / limit);
+
+    res.json({
+      success: true,
+      data: {
+        students: students,
+        pagination: {
+          current_page: parseInt(page),
+          total_pages: totalPages,
+          total_students: totalStudents,
+          has_next: page < totalPages,
+          has_prev: page > 1
+        }
+      }
+    });
+
+  } catch (error) {
+    console.error('Error fetching students list:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error fetching students list',
+      error: error.message
+    });
+  }
+});
+
+
+
+
+
+
+
+
+
+
 app.get("/health", async (req, res) => {
   try {
     // Simple ping to DB
@@ -1448,7 +1512,6 @@ const PORT = process.env.PORT || 3000;
   });
 })();
    
-
 
 
 
