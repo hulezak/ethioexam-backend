@@ -957,7 +957,6 @@ app.put('/api/update_question', async (req, res) => {
 
 
 
-
 // students
 
 // get public exam from exam tabel fetch exam whcih are public and send tehm to frotend broo
@@ -967,7 +966,8 @@ app.get('/students/public-exams', authenticate, async (req, res) => {
   try {
     let query = '';
     let params = [];
-console.log('User role:', req.user.role);   
+    console.log('User role:', req.user.role);   
+    
     if (req.user.role === 'admin') {
       // Admin sees all public exams
       query = `
@@ -981,26 +981,44 @@ console.log('User role:', req.user.role);
     } else {
       // Student → fetch stream from students table
       console.log('Fetching student stream for user_id:', req.user.user_id);
+      
       const [studentRows] = await pool.query(
-        'SELECT stream FROM students WHERE user_id = ?',
+        'SELECT stream, grade_level FROM students WHERE user_id = ?',
         [req.user.user_id]
       );
 
       if (!studentRows.length) {
         return res.status(404).json({ success: false, message: 'Student not found' });
       }
-
+      
+      console.log('Student record:', studentRows);
       const studentStream = studentRows[0].stream;
+      const studentGrade = studentRows[0].grade_level;
 
-      query = `
-        SELECT 
-          exam_id, title, exam_type, exam_subject, status, exam_year, stream,
-          description, created_by, created_at
-        FROM exams
-        WHERE status = 'public' AND stream = ?
-        ORDER BY created_at DESC
-      `;
-      params = [studentStream];
+      // If student has no stream (null or empty), show all public exams like admin
+      if (!studentStream || studentStream === '' || studentStream === 'null') {
+        query = `
+          SELECT 
+            exam_id, title, exam_type, exam_subject, status, exam_year, stream,
+            description, created_by, created_at
+          FROM exams
+          WHERE status = 'public'
+          ORDER BY created_at DESC
+        `;
+        console.log('Student has no stream - showing all public exams');
+      } else {
+        // Student has a stream - show only exams matching their stream
+        query = `
+          SELECT 
+            exam_id, title, exam_type, exam_subject, status, exam_year, stream,
+            description, created_by, created_at
+          FROM exams
+          WHERE status = 'public' AND stream = ?
+          ORDER BY created_at DESC
+        `;
+        params = [studentStream];
+        console.log('Student stream found:', studentStream, '- filtering exams by stream');
+      }
     }
 
     const [rows] = await pool.query(query, params);
@@ -1021,7 +1039,6 @@ console.log('User role:', req.user.role);
     });
   }
 });
-
 
 
 app.get('/students/exam-questions/:examId', async (req, res) => {
@@ -1062,6 +1079,7 @@ console.log('Fetching public questions for examId:', examId);
     const [rows] = await pool.execute(questionsQuery, [examId]);
 
     if (rows.length === 0) {
+      // check student grade and if it 9 or 10th excute the admin pool request which both social and natural exam
       return res.status(404).json({ success: false, message: 'No questions found' });
     }
 
@@ -1423,8 +1441,6 @@ app.get('/user/:userid/referrals', authenticate, async (req, res) => {
 
 
 
-
-
 app.post('/students/list', authenticate, async (req, res) => {
   console.log('Fetching all students list');
   try {
@@ -1482,12 +1498,6 @@ app.post('/students/list', authenticate, async (req, res) => {
 
 
 
-
-
-
-
-
-
 app.get("/health", async (req, res) => {
   try {
     // Simple ping to DB
@@ -1498,7 +1508,6 @@ app.get("/health", async (req, res) => {
     res.status(503).send("❌ Database connection failed");
   }
 })
-
 
 
 
