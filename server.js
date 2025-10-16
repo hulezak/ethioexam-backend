@@ -41,8 +41,7 @@ const app = express();
 const allowedOrigins = [
   'http://localhost:5173',      // for local React dev
   'https://ethioexam.netlify.app',
-  'https://ethioexam2.netlify.app',
-  'https://ethioexam.pro.et'// production React app
+  'https://ethioexam2.netlify.app' // production React app
 ];
 
 app.use(cors({
@@ -108,7 +107,7 @@ app.post('/auth/login', async (req, res) => {
       role: users[0].role 
     };
 
-    const token = jwt.sign(payload, SECRET_KEY, { expiresIn: '30h' });
+    const token = jwt.sign(payload, SECRET_KEY, { expiresIn: '1h' });
 
     // Save role in cookie for easy frontend access (optional)
     res.cookie('role', users[0].role, { httpOnly: false, secure: false, sameSite: 'Strict' });
@@ -1111,7 +1110,132 @@ console.log('Fetching public questions for examId:', examId);
 
 
 // 
-// Get dashboard stats + top referrers
+app.post('/auth/register/student', async (req, res) => {
+  const { 
+    email, 
+    password,
+    first_name, 
+    last_name, 
+    phone, 
+    school_name, 
+    grade_level,
+    stream,
+    referral_code
+  } = req.body;
+  console.log('Received registration data:', req.body);
+
+  console.log('Registering student:', { email, first_name, school_name, grade_level });
+const referral_code1 = parseInt(referral_code);
+  // 1️⃣ Validation
+  if (!email || !password || !first_name || !last_name || !phone || !school_name || !grade_level) {
+    return res.status(400).json({ 
+      success: false, 
+      message: 'All required fields must be filled' 
+    });
+  }
+
+  const connection = await pool.getConnection();
+  
+  try {
+    await connection.beginTransaction();
+
+    // 2️⃣ Check if email already exists
+    const [existingUsers] = await connection.query(
+      'SELECT user_id FROM users WHERE email = ?',
+      [email]
+    );
+
+    if (existingUsers.length > 0) {
+      await connection.rollback();
+      return res.status(400).json({
+        success: false,
+        message: 'Email already exists'
+      });
+    }
+
+    // 3️⃣ If referral code provided → verify it exists in students table
+    let referredByStudentId = null;
+    if (referral_code1) {
+      const [referrer] = await connection.query(
+        'SELECT id FROM students WHERE id = ?',
+        [referral_code1]
+      );
+
+      if (referrer.length === 0) {
+        await connection.rollback();
+        return res.status(400).json({
+          success: false,
+          message: 'Invalid referral code'
+        });
+      }
+
+      // If valid, store it for later insert
+      referredByStudentId = referral_code1;
+    }
+
+    // 4️⃣ Hash password
+    const hashedPassword = await bcrypt.hash(password, 10);
+
+    // 5️⃣ Insert into users table
+    const [userResult] = await connection.query(
+      `INSERT INTO users 
+      (email, password_hash, role, first_name, last_name, phone) 
+      VALUES (?, ?, 'student', ?, ?, ?)`,
+      [email, hashedPassword, first_name, last_name, phone]
+    );
+
+    const userId = userResult.insertId;
+
+    // 6️⃣ Insert into students table
+    const [studentResult] = await connection.query(
+      `INSERT INTO students 
+      (user_id, school_name, grade_level, stream, referred_by, registration_date) 
+      VALUES (?, ?, ?, ?, ?, NOW())`,
+      [userId, school_name, grade_level, stream || null, referredByStudentId]
+    );
+
+    // 7️⃣ If referral was valid → update the referral count for that student
+    if (referredByStudentId) {
+      await connection.query(
+        `UPDATE students 
+         SET referral_count = COALESCE(referral_count, 0) + 1 
+         WHERE id = ?`,
+        [referredByStudentId]
+      );
+    }
+
+    // 8️⃣ Commit changes
+    await connection.commit();
+
+    res.status(201).json({
+      success: true,
+      message: 'Registration successful!',
+      studentId: studentResult.insertId
+    });
+
+  } catch (err) {
+    await connection.rollback();
+    console.error('Registration error:', err);
+    
+    if (err.code === 'ER_DUP_ENTRY') {
+      return res.status(400).json({
+        success: false,
+        message: 'Email already exists'
+      });
+    }
+
+    res.status(500).json({
+      success: false,
+      message: 'Registration failed. Please try again.'
+    });
+  } finally {
+    connection.release();
+  }
+});
+
+
+
+// / Get dashboard stats + top referrers
 app.get('/api/admin/dashboard/stats', authenticate, async (req, res) => {
   console.log('Fetching dashboard stats');
   try {
@@ -1313,6 +1437,7 @@ app.get("/health", async (req, res) => {
 
 
 
+
 // 🏁 Start Server after DB check
 const PORT = process.env.PORT || 3000;
 (async () => {
@@ -1322,7 +1447,6 @@ const PORT = process.env.PORT || 3000;
   });
 })();
    
-
 
 
 
