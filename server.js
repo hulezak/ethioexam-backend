@@ -17,7 +17,7 @@ const pool = mysql.createPool({
   password: process.env.DB_PASSWORD || 'HyQLLhLBFT2Q4ojr',
   database: process.env.DB_NAME || 'Ethio_Exam',
   waitForConnections: true,
-  connectionLimit: 10,
+  connectionLimit: 100,
   queueLimit: 0,
   ssl: {
     ca: fs.readFileSync('./isrgrootx1.pem') // path to your downloaded cert
@@ -983,7 +983,7 @@ app.get('/students/public-exams', authenticate, async (req, res) => {
       console.log('Fetching student stream for user_id:', req.user.user_id);
       
       const [studentRows] = await pool.query(
-        'SELECT stream, grade_level FROM students WHERE user_id = ?',
+        'SELECT stream FROM students WHERE user_id = ?',
         [req.user.user_id]
       );
 
@@ -993,7 +993,8 @@ app.get('/students/public-exams', authenticate, async (req, res) => {
       
       console.log('Student record:', studentRows);
       const studentStream = studentRows[0].stream;
-      const studentGrade = studentRows[0].grade_level;
+     
+
 
       // If student has no stream (null or empty), show all public exams like admin
       if (!studentStream || studentStream === '' || studentStream === 'null') {
@@ -1008,6 +1009,7 @@ app.get('/students/public-exams', authenticate, async (req, res) => {
         console.log('Student has no stream - showing all public exams');
       } else {
         // Student has a stream - show only exams matching their stream
+
         query = `
           SELECT 
             exam_id, title, exam_type, exam_subject, status, exam_year, stream,
@@ -1027,7 +1029,7 @@ app.get('/students/public-exams', authenticate, async (req, res) => {
       success: true,
       message: 'Public exams fetched successfully',
       data: rows,
-      count: rows.length
+      count: rows.length  
     });
 
   } catch (error) {
@@ -1495,6 +1497,74 @@ app.post('/students/list', authenticate, async (req, res) => {
   }
 });
 
+
+
+
+
+
+// ---- PING endpoint ----
+// Records last_active, starts new session, closes stale sessions
+app.post('/api/ping', async (req, res) => {
+  const { userId } = req.body;
+  const inactivityThresholdMinutes = 2; // consider inactive after 2 minutes
+  const now = new Date();
+  console.log(`Ping received from user ${userId} at ${now.toISOString()}`);
+
+  try {
+    // 1️⃣ Update last_active for this user
+    await pool.query(
+      'UPDATE users SET last_active = NOW() WHERE user_id = ?',
+      [userId]
+    );
+
+    // 2️⃣ Close stale sessions
+    const [staleSessions] = await pool.query(`
+      SELECT os.id, u.last_active
+      FROM online_sessions os
+      JOIN users u ON u.user_id = os.user_id
+      WHERE os.session_end IS NULL
+        AND u.last_active < NOW() - INTERVAL ? MINUTE
+    `, [inactivityThresholdMinutes]);
+
+    await Promise.all(
+      staleSessions.map(session =>
+        pool.query(
+          'UPDATE online_sessions SET session_end = ? WHERE id = ?',
+          [session.last_active, session.id]
+        )
+      )
+    );
+
+    // 3️⃣ Start new session for this user if none exists
+    await pool.query(`
+      INSERT INTO online_sessions (user_id, session_start)
+      SELECT ?, NOW()
+      WHERE NOT EXISTS (
+        SELECT 1 FROM online_sessions WHERE user_id = ? AND session_end IS NULL
+      )
+    `, [userId, userId]);
+
+    res.sendStatus(200);
+  } catch (err) {
+    console.error('Ping error:', err);
+    res.sendStatus(500);
+  }
+});
+
+// ---- Online users endpoint ----
+app.get('/api/online', async (req, res) => {
+  try {
+    const [rows] = await pool.query(`
+      SELECT user_id, first_name, last_name
+      FROM users
+      WHERE last_active >= NOW() - INTERVAL 1 MINUTE
+    `);
+    res.json({ online_users: rows });
+  } catch (err) {
+    console.error(err);
+    res.sendStatus(500);
+  }
+});
 
 
 
