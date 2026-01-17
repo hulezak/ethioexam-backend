@@ -66,155 +66,60 @@ app.use(cookieParser());
 
 
 // ========== BREVO API SETUP ==========
-const BREVO_API_KEY = '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';
+const { Resend } = require('resend');
+const resend = new Resend('re_VncZDWzZ_2NLioTnJpGucF63GB3cFWQeE');
 
-async function sendBrevoEmail(email, resetLink) {
-  console.log('📤 Sending email via Brevo API to:', email);
+
+async function sendResetEmail(email, resetLink) {
+  console.log('📤 Sending email via Resend to:', email);
   
-  const emailData = {
-    sender: {
-      name: 'Ethioexam Support',
-      email: 'info.ethioexam@gmail.com'
-    },
-    to: [{
-      email: email,
-      name: 'User'
-    }],
-    subject: 'Reset Your Ethioexam Password',
-    htmlContent: `
-      <!DOCTYPE html>
-      <html>
-      <head>
-        <meta charset="utf-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>Reset Password</title>
-        <style>
-         body { 
-  font-family: Arial, sans-serif; 
-  line-height: 1.6; 
-  color: #333; 
-  max-width: 600px; 
-  margin: 0 auto; 
-  padding: 20px; 
-}
-.header { 
-  background: #4361ee; 
-  color: white; 
-  padding: 30px; 
-  text-align: center; 
-  border-radius: 10px 10px 0 0; 
-}
-.content { 
-  padding: 30px; 
-  background: #f8f9fa; 
-  border-radius: 0 0 10px 10px; 
-  border: 1px solid #e9ecef; 
-  border-top: none; 
-}
-.button { 
-  background: #fdff80; /* Changed from #e6e7e9 to #4361ee */
-  color: white; 
-  padding: 14px 32px; 
-  text-decoration: none; 
-  border-radius: 8px; 
-  display: inline-block; 
-  font-weight: bold; 
-  margin: 20px 0;
-  font-size: 16px;
-  box-shadow: 0 4px 6px rgba(67, 97, 238, 0.3);
-  transition: all 0.3s ease;
-}
-.button:hover {
-  background: #3a56d4;
-  box-shadow: 0 6px 12px rgba(67, 97, 238, 0.4);
-  transform: translateY(-2px);
-}
-.code-box { 
-  background: #e9ecef; 
-  padding: 15px; 
-  border-radius: 5px; 
-  word-break: break-all; 
-  font-family: monospace; 
-  margin: 20px 0;
-  font-size: 14px;
-}
-.footer { 
-  margin-top: 30px; 
-  padding-top: 20px; 
-  border-top: 1px solid #ddd; 
-  color: #666; 
-  font-size: 12px; 
-}
-.warning { 
-  color: #e63946; 
-  font-weight: bold;
-  background: #ffe5e5;
-  padding: 10px 15px;
-  border-radius: 5px;
-  border-left: 4px solid #e63946;
-  margin: 20px 0;
-}
-        </style>
-      </head>
-      <body>
-        <div class="header">
-          <h1 style="margin: 0; font-size: 28px;">Password Reset</h1>
-        </div>
-        
-        <div class="content">
-          <p>Hello,</p>
-          <p>You requested a password reset for your Ethioexam account. Click the button below to reset your password:</p>
-          
-          <div style="text-align: center;">
-            <a href="${resetLink}" class="button">Reset Password</a>
-          </div>
-          
-          <p>Or copy and paste this link into your browser:</p>
-          <div class="code-box">${resetLink}</div>
-          
-          <p class="warning">⚠️ This link will expire in 1 hour.</p>
-          
-          <p>If you didn't request a password reset, please ignore this email or contact support if you have concerns.</p>
-          
-          <div class="footer">
-            <p>Best regards,<br>The Ethioexam Team</p>
-            <p>© ${new Date().getFullYear()} Ethioexam. All rights reserved.</p>
-          </div>
-        </div>
-      </body>
-      </html>
-    `
-  };
-
   try {
-    const response = await fetch('https://api.brevo.com/v3/smtp/email', {
-      method: 'POST',
-      headers: {
-        'accept': 'application/json',
-        'api-key': BREVO_API_KEY,
-        'content-type': 'application/json'
-      },
-      body: JSON.stringify(emailData)
+    const data = await resend.emails.send({
+      from: 'Ethioexam <onboarding@resend.dev>',
+      to: email,
+      subject: 'Reset Your Ethioexam Password',
+      html: `
+        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+          <div style="background: #4361ee; color: white; padding: 30px; text-align: center; border-radius: 10px 10px 0 0;">
+            <h1 style="margin: 0; font-size: 28px;">Password Reset</h1>
+          </div>
+          
+          <div style="padding: 30px; background: #f8f9fa; border-radius: 0 0 10px 10px;">
+            <p>Hello,</p>
+            <p>Click the button below to reset your password:</p>
+            
+            <div style="text-align: center; margin: 30px 0;">
+              <a href="${resetLink}" 
+                 style="background: #4361ee; color: white; padding: 14px 32px; text-decoration: none; border-radius: 8px; display: inline-block; font-weight: bold;">
+                Reset Password
+              </a>
+            </div>
+            
+            <p>Or copy this link:</p>
+            <div style="background: #e9ecef; padding: 15px; border-radius: 5px; word-break: break-all;">
+              ${resetLink}
+            </div>
+            
+            <p style="color: #e63946; font-weight: bold; margin-top: 20px;">
+              ⚠️ This link expires in 1 hour.
+            </p>
+            
+            <div style="margin-top: 30px; padding-top: 20px; border-top: 1px solid #ddd; color: #666; font-size: 12px;">
+              <p>If you didn't request this, please ignore this email.</p>
+              <p>© ${new Date().getFullYear()} Ethioexam</p>
+            </div>
+          </div>
+        </div>
+      `
     });
 
-    const data = await response.json();
-    
-    if (!response.ok) {
-      console.error('❌ Brevo API error:', {
-        status: response.status,
-        statusText: response.statusText,
-        data: data
-      });
-      throw new Error(`Brevo API error: ${response.status} - ${JSON.stringify(data)}`);
-    }
-
-    console.log('✅ Brevo email sent successfully:', data);
-    return { success: true, messageId: data.messageId };
+    console.log('✅ Email sent successfully via Resend');
+    return { success: true, messageId: data.id };
     
   } catch (error) {
-    console.error('❌ Failed to send email via Brevo API:', error.message);
+    console.error('❌ Resend error:', error.message);
     
-    // Fallback: log the link for manual sending
+    // Fallback: log the link
     console.log('🔗 RESET LINK FOR MANUAL SENDING:');
     console.log('   Email:', email);
     console.log('   Link:', resetLink);
@@ -222,10 +127,11 @@ async function sendBrevoEmail(email, resetLink) {
     return { 
       success: false, 
       error: error.message,
-      resetLink: resetLink // Return link for fallback handling
+      resetLink: resetLink
     };
   }
 }
+
 
 
 // 📌 AUTH ENDPOINTS
@@ -345,7 +251,7 @@ app.post('/auth/forgot-password', async (req, res) => {
     console.log('📧 Sending reset email via Brevo API...');
     
     // 🔥 CHANGED: Send email via Brevo API instead of SMTP
-    const emailResult = await sendBrevoEmail(email, resetLink);
+   const emailResult = await sendResetEmail(email, resetLink);
     
     if (!emailResult.success) {
       console.log('⚠️ Email sending failed:', emailResult.error);
