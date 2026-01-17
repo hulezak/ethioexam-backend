@@ -63,7 +63,7 @@ app.use(bodyParser.json());
 app.use(cookieParser());
 // 🔐 Authentication Middleware
 
-// 
+
 
 // ========== SMTP SETUP ==========
 const transporter = nodemailer.createTransport({
