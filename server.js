@@ -7,8 +7,12 @@ const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
 const cors = require('cors');
 const cookieParser= require('cookie-parser');
+const crypto = require('crypto')
 const SECRET_KEY = process.env.JWT_SECRET || 'haile';
+const nodemailer = require('nodemailer');
+const FRONTEND_URL = process.env.FRONTEND_URL || 'https://ethioexam.pro.et';
 
+// Continue with the rest of your code...
 // ✅ TiDB Connection Pool
 const pool = mysql.createPool({
   host: process.env.DB_HOST || 'gateway01.us-west-2.prod.aws.tidbcloud.com',
@@ -40,7 +44,7 @@ async function checkDBConnection() {
 const app = express();
 const allowedOrigins = [
   'http://localhost:5173',      // for local React dev
-  'https://ethioexam.et',
+  'https://ethioexam.netlify.app',
   'https://ethioexam2.netlify.app' ,// production React app
   'https://ethioexam.pro.et' // production React app
 ];
@@ -59,6 +63,18 @@ app.use(bodyParser.json());
 app.use(cookieParser());
 // 🔐 Authentication Middleware
 
+// 
+
+// ========== SMTP SETUP ==========
+const transporter = nodemailer.createTransport({
+  host: 'smtp-relay.brevo.com',
+  port: 587,
+  secure: false, // true for 465, false for other ports
+  auth: {
+    user: '9e7d66001@smtp-brevo.com', // Your Brevo SMTP login
+    pass: 'bsk4jTyp6IqqOJ6' // Get from Brevo Dashboard > SMTP/API
+  }
+});
 
 // 📌 AUTH ENDPOINTS
 app.post('/auth/register', async (req, res) => {
@@ -88,9 +104,8 @@ app.post('/auth/register', async (req, res) => {
   }
 });
 
-
-
 // ==================== LOGIN ====================
+
 app.post('/auth/login', async (req, res) => {
   const { email, password } = req.body;
   if (!email || !password) return res.status(400).send('All fields are required');
@@ -117,6 +132,382 @@ app.post('/auth/login', async (req, res) => {
   } catch (err) {
     console.error(err);
     res.status(500).send('Login failed');
+  }
+});
+
+
+// ========== FORGOT PASSWORD ==========
+app.post('/auth/forgot-password', async (req, res) => {
+  const { email } = req.body;
+  
+  if (!email || !email.includes('@')) {
+    return res.status(400).json({ message: 'Valid email is required' });
+  }
+  
+  console.log('🔐 Forgot password request for:', email);
+  
+  try {
+    const [rows] = await pool.query('SELECT user_id FROM users WHERE email = ?', [email.toLowerCase().trim()]);
+    
+    // Security: Always return success message
+    if (!rows.length) {
+      console.log('⚠️ Email not found (security response)');
+      return res.json({ 
+        message: 'If your email is registered, you will receive a reset link shortly.',
+        success: true 
+      });
+    }
+
+    const userId = rows[0].user_id;
+    
+    // Check for existing valid tokens first (prevent spam)
+    const [existingTokens] = await pool.query(
+      'SELECT id, token FROM password_resets WHERE user_id = ? AND used = 0 AND expires > UTC_TIMESTAMP()',
+      [userId]
+    );
+    
+    let token;
+    
+    if (existingTokens.length > 0) {
+      // Reuse existing valid token
+      token = existingTokens[0].token;
+      console.log('↪️ Using existing token for user:', userId);
+    } else {
+      // Generate new token
+      token = crypto.randomBytes(32).toString('hex');
+      const expires = new Date(Date.now() + 3600 * 1000); // 1 hour
+      const expiresUTC = expires.toISOString().slice(0, 19).replace('T', ' ');
+      
+      console.log('🆕 New token generated:', token.substring(0, 20) + '...');
+      console.log('Expires (UTC):', expiresUTC);
+      
+      await pool.query(
+        'INSERT INTO password_resets (user_id, token, expires) VALUES (?, ?, ?)',
+        [userId, token, expiresUTC]
+      );
+    }
+
+    // Create reset link
+    const resetLink = `${FRONTEND_URL}/reset-password?token=${token}`;
+    
+    console.log('📧 Sending reset email...');
+    
+    // Send email via SMTP
+    await transporter.sendMail({
+      from: '"Ethioexam Support" <info.ethioexam@gmail.com>',
+      to: email,
+      subject: 'Reset Your Ethioexam Password',
+      html: `
+        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+          <div style="background: #4361ee; color: white; padding: 30px; text-align: center; border-radius: 10px 10px 0 0;">
+            <h1 style="margin: 0;">Password Reset</h1>
+          </div>
+          
+          <div style="padding: 30px; background: #f8f9fa; border-radius: 0 0 10px 10px;">
+            <p>Hello,</p>
+            <p>You requested a password reset for your Ethioexam account.</p>
+            
+            <div style="text-align: center; margin: 30px 0;">
+              <a href="${resetLink}" 
+                 style="background: #4361ee; color: white; padding: 12px 30px; text-decoration: none; border-radius: 5px; display: inline-block; font-weight: bold;">
+                Reset Password
+              </a>
+            </div>
+            
+            <p>Or copy this link:</p>
+            <div style="background: #e9ecef; padding: 15px; border-radius: 5px; word-break: break-all;">
+              ${resetLink}
+            </div>
+            
+            <p style="color: #e63946; font-weight: bold;">⚠️ This link expires in 1 hour.</p>
+            
+            <div style="margin-top: 30px; padding-top: 20px; border-top: 1px solid #ddd; color: #666; font-size: 12px;">
+              <p>If you didn't request this, please ignore this email.</p>
+              <p>© ${new Date().getFullYear()} Ethioexam</p>
+            </div>
+          </div>
+        </div>
+      `,
+      text: `Reset your password: ${resetLink}\n\nThis link expires in 1 hour.\n\nIf you didn't request this, please ignore.`
+    });
+
+    console.log('✅ Password reset email sent to:', email);
+    
+    res.json({ 
+      message: 'If your email is registered, you will receive a password reset link shortly.',
+      success: true
+    });
+    
+  } catch (err) {
+    console.error('🔥 Forgot password error:', err);
+    res.status(500).json({ 
+      message: 'Something went wrong. Please try again later.',
+      success: false
+    });
+  }
+});
+
+// ========== RESET PASSWORD ==========
+app.post('/auth/reset-password', async (req, res) => {
+  const { token, newPassword } = req.body;
+  
+  console.log('=== RESET PASSWORD REQUEST ===');
+  console.log('Token (first 20 chars):', token ? token.substring(0, 20) + '...' : 'none');
+  console.log('Password length:', newPassword?.length || 0);
+  
+  if (!token || !newPassword) {
+    console.log('❌ Missing token or password');
+    return res.status(400).json({ 
+      message: 'Token and new password are required' 
+    });
+  }
+
+  if (newPassword.length < 8) {
+    console.log('❌ Password too short');
+    return res.status(400).json({ 
+      message: 'Password must be at least 8 characters' 
+    });
+  }
+
+  try {
+    // Find valid token using UTC time
+    const [rows] = await pool.query(
+      `SELECT pr.*, u.email 
+       FROM password_resets pr
+       LEFT JOIN users u ON pr.user_id = u.user_id
+       WHERE pr.token = ? 
+         AND pr.used = 0 
+         AND pr.expires > UTC_TIMESTAMP()`,
+      [token]
+    );
+    
+    console.log(`🔍 Found ${rows.length} valid token(s)`);
+    
+    if (rows.length === 0) {
+      // Debug why token is invalid
+      const [debugRows] = await pool.query(
+        `SELECT 
+          pr.token,
+          pr.used,
+          pr.expires,
+          u.email,
+          UTC_TIMESTAMP() as current_utc,
+          pr.expires > UTC_TIMESTAMP() as is_valid,
+          TIMESTAMPDIFF(SECOND, UTC_TIMESTAMP(), pr.expires) as seconds_left
+         FROM password_resets pr
+         LEFT JOIN users u ON pr.user_id = u.user_id
+         WHERE pr.token = ?`,
+        [token]
+      );
+      
+      console.log('📊 Token debug info:', debugRows);
+      
+      if (debugRows.length === 0) {
+        return res.status(400).json({ 
+          message: 'Invalid reset token' 
+        });
+      }
+      
+      const debug = debugRows[0];
+      if (debug.used) {
+        return res.status(400).json({ 
+          message: 'This reset link has already been used' 
+        });
+      }
+      
+      if (!debug.is_valid) {
+        return res.status(400).json({ 
+          message: 'Reset link has expired. Please request a new one.' 
+        });
+      }
+      
+      return res.status(400).json({ 
+        message: 'Invalid reset token' 
+      });
+    }
+
+    const reset = rows[0];
+    console.log('✅ Valid token found');
+    console.log('   User ID:', reset.user_id);
+    console.log('   User email:', reset.email);
+    console.log('   Token expires:', reset.expires);
+    
+    // Hash the new password
+    const hashedPassword = await bcrypt.hash(newPassword, 10);
+    console.log('🔐 Password hashed');
+    
+    // Update user's password
+    const [updateResult] = await pool.query(
+      'UPDATE users SET password_hash = ? WHERE user_id = ?', 
+      [hashedPassword, reset.user_id]
+    );
+    
+    console.log('📝 Password updated. Affected rows:', updateResult.affectedRows);
+    
+    if (updateResult.affectedRows === 0) {
+      console.log('⚠️ No user found with ID:', reset.user_id);
+      return res.status(400).json({ 
+        message: 'User account not found' 
+      });
+    }
+    
+    // Mark token as used
+    await pool.query(
+      'UPDATE password_resets SET used = 1 WHERE id = ?', 
+      [reset.id]
+    );
+    
+    console.log('🏷️ Token marked as used');
+    console.log('🎉 PASSWORD RESET SUCCESSFUL!');
+    
+    res.json({ 
+      message: 'Password has been reset successfully!',
+      success: true
+    });
+    
+  } catch (err) {
+    console.error('🔥 Reset password error:', err);
+    console.error('Error stack:', err.stack);
+    res.status(500).json({ 
+      message: 'Server error. Please try again later.' 
+    });
+  }
+});
+
+// ===== test email ========
+
+// Test the connection
+transporter.verify((error, success) => {
+  if (error) {
+    console.log('❌ SMTP Connection Error:', error.message);
+  } else {
+    console.log('✅ SMTP Server is ready to send emails');
+  }
+});
+
+// ========== TEST EMAIL ENDPOINT ==========
+app.get('/test-email', async (req, res) => {
+  const { email = 'haileadane3723@gmail.com' } = req.query;
+  
+  console.log(`📤 Sending test email to: ${email}`);
+  
+  try {
+    // Send the email
+    const info = await transporter.sendMail({
+      from: '"Ethioexam" <info.ethioexam@gmail.com>',
+      to: email,
+      subject: '✅ TEST: Ethioexam Email Service Working',
+      text: `Test email sent at ${new Date().toLocaleString()}\n\nYour email service is working!`,
+      html: `
+        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+          <div style="background: linear-gradient(135deg, #4361ee, #3a0ca3); color: white; padding: 30px; text-align: center; border-radius: 10px 10px 0 0;">
+            <h1 style="margin: 0;">✅ TEST SUCCESSFUL!</h1>
+            <p style="margin: 10px 0 0 0;">Ethioexam Email Service is Working</p>
+          </div>
+          
+          <div style="padding: 30px; background: #f8f9fa; border-radius: 0 0 10px 10px;">
+            <p>Hello,</p>
+            <p>This is a <strong>test email</strong> to confirm your Ethioexam email service is configured correctly.</p>
+            
+            <div style="background: white; padding: 20px; border-radius: 8px; margin: 20px 0;">
+              <h3 style="margin-top: 0;">📋 Test Details:</h3>
+              <p><strong>To:</strong> ${email}</p>
+              <p><strong>Time:</strong> ${new Date().toLocaleString()}</p>
+              <p><strong>Status:</strong> <span style="color: #28a745;">Active ✓</span></p>
+            </div>
+            
+            <p>If you can read this, your SMTP setup with Brevo is working perfectly! 🎉</p>
+            
+            <div style="margin-top: 30px; padding-top: 20px; border-top: 1px solid #ddd; color: #666; font-size: 12px;">
+              <p>This is an automated test message from Ethioexam server.</p>
+            </div>
+          </div>
+        </div>
+      `
+    });
+
+    console.log('✅ Email sent successfully!');
+    console.log('   Message ID:', info.messageId);
+    console.log('   Response:', info.response);
+
+    // Send success response
+    res.send(`
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <title>Test Email Sent</title>
+        <style>
+          body { font-family: Arial, sans-serif; text-align: center; padding: 50px; background: #f8f9fa; }
+          .card { background: white; max-width: 500px; margin: 0 auto; padding: 30px; border-radius: 10px; box-shadow: 0 5px 15px rgba(0,0,0,0.1); }
+          .success { color: #28a745; font-size: 24px; margin-bottom: 20px; }
+          .info { text-align: left; background: #f8f9fa; padding: 15px; border-radius: 5px; margin: 20px 0; }
+          .email { color: #4361ee; font-weight: bold; }
+        </style>
+      </head>
+      <body>
+        <div class="card">
+          <h1 class="success">✅ Test Email Sent!</h1>
+          <p>Check your inbox: <span class="email">${email}</span></p>
+          
+          <div class="info">
+            <p><strong>Message ID:</strong> ${info.messageId}</p>
+            <p><strong>Time:</strong> ${new Date().toLocaleString()}</p>
+            <p><strong>Status:</strong> Sent via Brevo SMTP</p>
+          </div>
+          
+          <p>
+            <a href="/test-email?email=${email}" style="background: #4361ee; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px; display: inline-block; margin: 10px;">
+              🔄 Send Another
+            </a>
+          </p>
+          
+          <p style="color: #666; margin-top: 30px;">
+            Server: ${req.headers.host}<br>
+            Time: ${new Date().toISOString()}
+          </p>
+        </div>
+      </body>
+      </html>
+    `);
+
+  } catch (error) {
+    console.error('❌ Email failed:', error.message);
+    
+    res.status(500).send(`
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <title>Email Failed</title>
+        <style>
+          body { font-family: Arial, sans-serif; text-align: center; padding: 50px; }
+          .error { color: #dc3545; font-size: 24px; }
+          .debug { background: #ffe5e5; padding: 20px; border-radius: 10px; max-width: 600px; margin: 20px auto; text-align: left; }
+        </style>
+      </head>
+      <body>
+        <h1 class="error">❌ Email Failed to Send</h1>
+        
+        <div class="debug">
+          <h3>Error Details:</h3>
+          <p><strong>Error:</strong> ${error.message}</p>
+          <p><strong>To:</strong> ${email}</p>
+          <p><strong>Time:</strong> ${new Date().toLocaleString()}</p>
+          
+          <h4>Possible Issues:</h4>
+          <ol>
+            <li>Check your Brevo SMTP password</li>
+            <li>Verify your Brevo account is active</li>
+            <li>Check internet connection</li>
+            <li>Try port 465 with secure: true</li>
+          </ol>
+        </div>
+        
+        <p>
+          <a href="/test-email" style="color: #007bff;">🔄 Try Again</a>
+        </p>
+      </body>
+      </html>
+    `);
   }
 });
 
@@ -155,7 +546,6 @@ app.get('/admin', authenticate, authorizeRole(['admin']), (req, res) => {
   res.send('Welcome Admin!');
 });
 
-
 // 👤 USER PROFILE
 app.get('/users/me', authenticate, async (req, res) => {
   try {
@@ -174,8 +564,6 @@ app.get('/users/me', authenticate, async (req, res) => {
     res.status(500).send({ message: 'Failed to fetch profile' });
   }
 });
-
-
 
 // user management
 
@@ -436,7 +824,6 @@ console.log(userRole,userId)
 });
 
 
-
 // 📚 SUBJECTS
 app.get('/subjects', async (req, res) => {
   try {
@@ -447,6 +834,7 @@ app.get('/subjects', async (req, res) => {
     res.status(500).send('Failed to fetch subjects');
   }
 });
+
 
 // 📊 EXAMS
 app.get('/exams/:id', async (req, res) => {
@@ -1591,7 +1979,6 @@ const PORT = process.env.PORT || 3000;
   });
 })();
    
-
 
 
 
