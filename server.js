@@ -11,7 +11,7 @@ const crypto = require('crypto')
 const fetch = (...args) => import('node-fetch').then(({default: fetch}) => fetch(...args));
 const SECRET_KEY = process.env.JWT_SECRET || 'haile';
 const nodemailer = require('nodemailer');
-const FRONTEND_URL = process.env.FRONTEND_URL || 'https://ethioexam.pro.et';
+const FRONTEND_URL ='https://ethioexam.pro.et';
 
 // Continue with the rest of your code...
 // ✅ TiDB Connection Pool
@@ -22,7 +22,7 @@ const pool = mysql.createPool({
   password: process.env.DB_PASSWORD || 'HyQLLhLBFT2Q4ojr',
   database: process.env.DB_NAME || 'Ethio_Exam',
   waitForConnections: true,
-  connectionLimit: 100,
+  connectionLimit: 10,
   queueLimit: 0,
   ssl: {
     ca: fs.readFileSync('./isrgrootx1.pem') // path to your downloaded cert
@@ -65,9 +65,8 @@ app.use(cookieParser());
 // 🔐 Authentication Middleware
 
 
-// ========== SMTP SETUP ==========
 // ========== BREVO API SETUP ==========
-const BREVO_API_KEY = process.env.BREVO_API_KEY || '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';
+const BREVO_API_KEY = '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';
 
 async function sendBrevoEmail(email, resetLink) {
   console.log('📤 Sending email via Brevo API to:', email);
