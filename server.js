@@ -45,7 +45,7 @@ async function checkDBConnection() {
 const app = express();
 const allowedOrigins = [
   'http://localhost:5173',      // for local React dev
-  'https://ethioexam.et',
+  'https://ethioexam.netlify.app',
   'https://ethioexam2.netlify.app' ,// production React app
   'https://ethioexam.pro.et' // production React app
 ];
@@ -588,12 +588,30 @@ app.get('/users/me', authenticate, async (req, res) => {
   }
 });
 
-// user management
 
 // GET all users
+// 📌 GET USERS ENDPOINT - Returns only students with their school name and phone
+// 📌 GET USERS ENDPOINT - Returns only students with their school name and phone
 app.get('/users', authenticate, async (req, res) => {
   try {
-    const [users] = await pool.query('SELECT * FROM users');
+    const [users] = await pool.query(
+      `SELECT 
+        u.user_id,
+        u.email, 
+        u.role, 
+        u.first_name, 
+        u.last_name, 
+        u.phone,
+        s.school_name,
+        s.grade_level,
+        s.stream,
+        s.referral_count,
+        s.registration_date
+      FROM users u
+      INNER JOIN students s ON u.user_id = s.user_id
+      WHERE u.role = 'student'`
+    );
+    
     res.json(users);
   } catch (err) {
     console.error(err);
@@ -2002,7 +2020,6 @@ const PORT = process.env.PORT || 3000;
   });
 })();
    
-
 
 
 
