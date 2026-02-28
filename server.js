@@ -48,7 +48,7 @@ const allowedOrigins = [
   'https://ethioexam.netlify.app',
   'https://ethioexam2.netlify.app' ,// production React app
   'https://ethioexam.pro.et' // ,
-  https://ethioexam.et/production React app
+  'https://ethioexam.et'
 ];
 
 app.use(cors({
@@ -2021,6 +2021,7 @@ const PORT = process.env.PORT || 3000;
   });
 })();
    
+
 
 
 
