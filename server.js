@@ -47,7 +47,7 @@ const allowedOrigins = [
   'http://localhost:5173',      // for local React dev
   'https://ethioexam.netlify.app',
   'https://ethioexam2.netlify.app' ,// production React app
-  'https://ethioexam.pro.et' // ,
+  'https://ethioexam.pro.et',
   'https://ethioexam.et'
 ];
 
@@ -2021,6 +2021,7 @@ const PORT = process.env.PORT || 3000;
   });
 })();
    
+
 
 
 
